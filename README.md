@@ -9,6 +9,6 @@ https://github.com/twentyone-cz/umbrel-store
 
 ## Appky
 
-- **jednadvacet phone** — vlastní telefonní brána: hovory a SMS z tvé SIM
-  karty kamkoli, přes privátní šifrovanou síť. Web produktu a návod:
+- **Phone21** — tvoje telefonní číslo s tebou kamkoli: hovory a zprávy
+  z tvé SIM karty přes privátní šifrovanou síť. Web produktu a návod:
   <https://phone.twentyone.cz>
