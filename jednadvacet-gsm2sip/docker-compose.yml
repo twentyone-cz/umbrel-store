@@ -1,0 +1,128 @@
+version: "3.7"
+
+# Phone21 pro Umbrel — ústředna (síť hostitele, USB modem), ovládání
+# (za app_proxy) a sidecar privátní sítě (login server CockScale).
+# Obrazy jsou multi-arch (amd64+arm64) z ghcr.io — tagy aktualizuje
+# umbrel/build-images.sh, před publikací se připínají digestem.
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: jednadvacet-gsm2sip_webui_1
+      APP_PORT: 8090
+
+  asterisk:
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.25@sha256:0631dbb4d2e6dc3075079a2fd760d4c56ea1ccc1bfc04c02e6bc0e0017caa536
+    restart: on-failure
+    network_mode: host            # rozsah portů hovorů + adresa v privátní síti
+    # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' | grep -q 'System uptime'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      GSM2SIP_SELFCONFIG: "1"     # render konfigurace při každém startu
+      SUPERVISE: "1"              # restart procesu po pádu/watchdogu
+      WATCHDOG_INTERNAL: "1"      # hlídání modemu
+      MBN_INTERNAL: "1"           # profil operátora v modemu
+      FIREWALL_INTERNAL: "1"      # filtr provozu z privátní sítě
+      # profil operátora: auto = volba podle mapy operátor→profil (MBN_MAP);
+      # mapu lze dodat souborem mbn.env v datovém adresáři aplikace
+      MBN_PROFILE: ${MBN_PROFILE:-auto}
+      MBN_MAP: ${MBN_MAP:-}
+      COUNTRY_CODE: "420"
+      # rozhraní ústředny: bind všude, seznam povolených adres pouští jen
+      # localhost a interní subnety aplikace
+      AMI_BIND: 0.0.0.0
+      AMI_PERMIT: "127.0.0.1/255.255.255.255,10.21.0.0/255.255.0.0"
+      # Ostrovní režim (failover internetu přes modem) — opt-in:
+      WWAN_FAILOVER: ${WWAN_FAILOVER:-0}
+      WWAN_APN: ${WWAN_APN:-internet}
+    cap_add:
+      - NET_ADMIN                 # ostrovní režim a filtr privátní sítě
+    group_add:
+      - "20"                      # dialout
+    devices:
+      - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if02-port0:/dev/ttyUSB2"
+      - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if04-port0:/dev/ttyUSB4"
+      - "/dev/cdc-wdm0:/dev/cdc-wdm0"   # datové rozhraní modemu (volitelné)
+    volumes:
+      - ${APP_DATA_DIR}/data/smsdata:/var/lib/gsm2sip
+      - ${APP_DATA_DIR}/data/spool:/var/spool/asterisk/outgoing
+      - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk
+      # systemd D-Bus hostitele: uvolnění datového rozhraní modemu
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+
+  webui:
+    # 8091 = nastavení telefonu, dosažitelné z telefonu přímo;
+    # chrání ho jednorázový token
+    ports:
+      - "8091:8091"
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.25@sha256:8a260d5e09a7dbf5bfd9d651af48cce7e8084da42382280afa9dd39f3783bc30
+    restart: on-failure
+    # zdraví = přihlašovací stránka odpovídá
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/login' % os.environ.get('WEBUI_PORT','8090'), timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      WEBUI_PASSWORD: ${APP_PASSWORD}
+      WEBUI_PORT: 8090
+      AMI_HOST: host.docker.internal
+      # heslo k rozhraní ústředny generuje kontejner ústředny, ovládání
+      # si ho přečte ze sdíleného souboru:
+      AMI_SECRETS_FILE: /var/lib/gsm2sip/secrets.env
+      TS_DIR: /var/lib/gsm2sip/ts
+      ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
+      UI_MODE: gui             # spotřebitelský dashboard (Docker default = expert)
+      NET_DASHBOARD_URL: ${NET_DASHBOARD_URL:-https://phone.twentyone.cz/pay}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${APP_DATA_DIR}/data/smsdata:/var/lib/gsm2sip:ro
+      - ${APP_DATA_DIR}/data/smsdata/ts:/var/lib/gsm2sip/ts:rw
+      # stav ovládání (2FA, token) — jediné zapisovatelné místo mimo ts/
+      - ${APP_DATA_DIR}/data/smsdata/webui:/var/lib/gsm2sip/webui:rw
+      - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk:ro
+
+  tailnet:
+    # Sidecar privátní sítě (login server CockScale, telemetrie vypnutá).
+    # Čeká na klíč, který uživatel vloží v ovládání (záložka Síť).
+    image: tailscale/tailscale:v1.86.2@sha256:241d9518b7e0b6e533dbd0117fcea15acb4174249210837f52b71615949ce9d2
+    restart: on-failure
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TS_NO_LOGS_NO_SUPPORT: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      COCKSCALE_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
+    volumes:
+      - ${APP_DATA_DIR}/data/ts-state:/var/lib/tailscale
+      - ${APP_DATA_DIR}/data/smsdata/ts:/gsm2sip-ts
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # počkat na klíč z ovládání, pak se připojit na CockScale;
+        # adresu v síti zapsat pro ústřednu a pro ovládání
+        until [ -s /gsm2sip-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
+        # rozhraní sítě vzniká na hostiteli, aby byla ústředna dosažitelná
+        # na adrese v privátní síti
+        tailscaled --state=/var/lib/tailscale/tailscaled.state &
+        sleep 3
+        if [ -s /gsm2sip-ts/authkey ]; then
+          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /gsm2sip-ts/authkey)" --accept-dns=false && rm -f /gsm2sip-ts/authkey
+        fi
+        while true; do
+          ip="$$(tailscale ip -4 2>/dev/null | head -1)"
+          [ -n "$$ip" ] && echo "$$ip" > /gsm2sip-ts/ip
+          sleep 60
+        done
