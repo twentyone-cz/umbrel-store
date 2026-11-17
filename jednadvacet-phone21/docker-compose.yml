@@ -18,7 +18,7 @@ services:
       APP_PORT: 8090
 
   pbx:
-    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.43@sha256:09d28801389d38818693e7a5e3865e0d1a2fe64f5da39fdfcfc813fddd4fe336
+    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.44@sha256:8b8823d5f6e178ac367dfcea2dfe6aca8b39fe803ac13a6f46565c6c7b064c9b
     restart: on-failure
     network_mode: host            # rozsah portů hovorů + adresa v privátní síti
     # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
@@ -76,7 +76,7 @@ services:
     # chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/phone21-ui:0.9.43@sha256:5b6fd4b48b81fa1e6759ac16ebda85faa4c9cc994a2152870a9d014c6f8ffc4b
+    image: ghcr.io/twentyone-cz/phone21-ui:0.9.44@sha256:35c3083aa399c3c2a502b4b494a402a8503f5ecfe581b8b6b72d08d72d290927
     restart: on-failure
     # strop logu: max 10 MB × 3 soubory
     logging:
@@ -124,7 +124,7 @@ services:
     # ovládání z ní bere stav a bez běžící služby by neměl kdo hlásit, že
     # brána v síti není. Klíč si ovládání vyžádá u koordinátoru samo a předá
     # ho sdíleným adresářem, nikdy argumentem.
-    image: tailscale/tailscale:v1.86.2@sha256:241d9518b7e0b6e533dbd0117fcea15acb4174249210837f52b71615949ce9d2
+    image: tailscale/tailscale:v1.104.7@sha256:72c1e19e0aedca96b8533bbb0b4368564410ff20b17e53b804eb6c1f04a31be4
     restart: on-failure
     network_mode: host
     # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
@@ -594,6 +594,8 @@ services:
           if [ -n "$$IP4" ]; then
             up_cur=$$(sed -n '1p' "$$TS/ip" 2>/dev/null)
             if [ "$$up_cur" != "$$IP4" ]; then
+              # záměr: když selže zápis nebo přesun, uklidit dočasný soubor
+              # shellcheck disable=SC2015
               printf '%s\n' "$$IP4" 2>/dev/null > "$$TS/.ip.tmp" \
                 && mv -f "$$TS/.ip.tmp" "$$TS/ip" 2>/dev/null \
                 || rm -f "$$TS/.ip.tmp" 2>/dev/null
@@ -715,7 +717,7 @@ services:
 
   # Kontakty a kalendář (server pro synchronizaci zařízení).
   dav:
-    image: ghcr.io/twentyone-cz/phone21-dav:0.9.43@sha256:93d23e972b1ecc8074239fd60f37edc339fab09a550a7281578e6f6421a0baa4
+    image: ghcr.io/twentyone-cz/phone21-dav:0.9.44@sha256:786c9b768ce87e5de93f2ca773e1c63bceae4e1939641729b672867e3deaeffe
     restart: on-failure
     # strop logu: max 10 MB × 3 soubory
     logging:
